@@ -8,14 +8,19 @@ from rich.table import Table
 from .config import SETTINGS
 from .paper import record
 from .polymarket import fetch_markets, load_markets_from_file
-from .research import estimate_probability
+from .research import ResearchProviderError, estimate_probability, resolve_provider
 from .risk import decide_trade
 from .scanner import rank_markets
 
 console = Console()
 
 
-def run(max_research: int = 5, execute_paper: bool = False, demo: bool = False) -> None:
+def run(
+    max_research: int = 5,
+    execute_paper: bool = False,
+    demo: bool = False,
+    provider: str | None = None,
+) -> None:
     if demo:
         console.print("[bold]Loading synthetic demo markets…[/bold]")
         markets = load_markets_from_file("data/demo_markets.json")
@@ -27,6 +32,7 @@ def run(max_research: int = 5, execute_paper: bool = False, demo: bool = False) 
             console.print(f"[red]Market fetch failed:[/red] {exc}")
             console.print("Run `python -m poly_agent.main --demo --research 0` to verify the local scanner without network access.")
             return
+
     ranked = rank_markets(markets)
 
     table = Table(title="Top Scanner Candidates")
@@ -38,19 +44,31 @@ def run(max_research: int = 5, execute_paper: bool = False, demo: bool = False) 
         table.add_row(f"{m.yes_price:.1%}", f"${m.liquidity:,.0f}", f"${m.volume:,.0f}", m.question)
     console.print(table)
 
-    if not SETTINGS.openai_api_key:
-        console.print("\n[yellow]No OPENAI_API_KEY found. Scanner works; AI research is skipped.[/yellow]")
+    if max_research <= 0:
         return
 
+    try:
+        selected_provider = resolve_provider(provider)
+    except ResearchProviderError as exc:
+        console.print(f"\n[red]Research provider error:[/red] {exc}")
+        return
+
+    if selected_provider == "openai" and not SETTINGS.openai_api_key:
+        console.print("\n[red]OpenAI provider selected but OPENAI_API_KEY is not set.[/red]")
+        return
+
+    console.print(f"\n[bold]Research provider:[/bold] {selected_provider}")
     bankroll = SETTINGS.starting_bankroll
-    decisions = []
+
     for market in ranked[:max_research]:
         console.print(f"\n[bold cyan]Researching:[/bold cyan] {market.question}")
-        estimate = estimate_probability(market)
-        if estimate is None:
-            continue
+        try:
+            estimate = estimate_probability(market, provider=selected_provider)
+        except ResearchProviderError as exc:
+            console.print(f"[red]Research failed:[/red] {exc}")
+            return
+
         decision = decide_trade(market, estimate, bankroll)
-        decisions.append((market, estimate, decision))
         console.print(
             f"Market YES {market.yes_price:.1%} | fair YES {estimate.fair_yes_probability:.1%} | "
             f"confidence {estimate.confidence:.0%} | decision [bold]{decision.side}[/bold] | "
@@ -65,11 +83,12 @@ def run(max_research: int = 5, execute_paper: bool = False, demo: bool = False) 
 
 def cli() -> None:
     parser = argparse.ArgumentParser(description="Polymarket research and paper-trading agent")
-    parser.add_argument("--research", type=int, default=5, help="How many top markets to research with OpenAI")
+    parser.add_argument("--research", type=int, default=5, help="How many top markets to research")
+    parser.add_argument("--provider", choices=["auto", "openai", "ollama"], default=SETTINGS.research_provider)
     parser.add_argument("--paper", action="store_true", help="Record qualifying simulated trades")
     parser.add_argument("--demo", action="store_true", help="Use bundled synthetic markets instead of the live API")
     args = parser.parse_args()
-    run(max_research=args.research, execute_paper=args.paper, demo=args.demo)
+    run(max_research=args.research, execute_paper=args.paper, demo=args.demo, provider=args.provider)
 
 
 if __name__ == "__main__":

@@ -18,8 +18,12 @@ def _i(name: str, default: int) -> int:
 
 @dataclass(frozen=True)
 class Settings:
+    research_provider: str = os.getenv("RESEARCH_PROVIDER", "auto").lower()
     openai_api_key: str | None = os.getenv("OPENAI_API_KEY") or None
     openai_model: str = os.getenv("OPENAI_MODEL", "gpt-5.6")
+    ollama_base_url: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+    ollama_model: str = os.getenv("OLLAMA_MODEL", "qwen3:8b")
+    research_timeout: int = _i("RESEARCH_TIMEOUT", 180)
     max_markets: int = _i("MAX_MARKETS", 30)
     min_liquidity: float = _f("MIN_LIQUIDITY", 25_000)
     min_volume: float = _f("MIN_VOLUME", 10_000)

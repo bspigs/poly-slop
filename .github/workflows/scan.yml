@@ -17,8 +17,15 @@ jobs:
           python-version: "3.12"
       - run: pip install -r requirements.txt
       - run: pytest -q
-      - name: Run scanner
+      - name: Run keyless scanner
+        run: python -m poly_agent.main --research 0
+      - name: Run OpenAI research when configured
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           OPENAI_MODEL: gpt-5.6
-        run: python -m poly_agent.main --research 3
+        run: |
+          if [ -n "$OPENAI_API_KEY" ]; then
+            python -m poly_agent.main --provider openai --research 3
+          else
+            echo "OPENAI_API_KEY not set; cloud AI research skipped."
+          fi
