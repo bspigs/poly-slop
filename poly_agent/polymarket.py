@@ -45,12 +45,18 @@ def _parse_dt(value: Any) -> datetime | None:
 def normalize_market(raw: dict[str, Any]) -> Market | None:
     outcomes = _parse_jsonish(raw.get("outcomes"))
     prices = _parse_jsonish(raw.get("outcomePrices"))
+    token_ids = _parse_jsonish(raw.get("clobTokenIds"))
     if len(outcomes) < 2 or len(prices) < 2:
         return None
 
     labels = [str(o).strip() for o in outcomes]
     price_by_outcome = {label.lower(): _num(p) for label, p in zip(labels, prices)}
     label_by_key = {label.lower(): label for label in labels}
+    token_by_key = {
+        label.lower(): str(token)
+        for label, token in zip(labels, token_ids)
+        if token is not None
+    }
 
     if "yes" in price_by_outcome and "no" in price_by_outcome:
         positive_key, negative_key = "yes", "no"
@@ -73,6 +79,8 @@ def normalize_market(raw: dict[str, Any]) -> Market | None:
         no_price=price_by_outcome[negative_key],
         positive_label=label_by_key[positive_key].upper(),
         negative_label=label_by_key[negative_key].upper(),
+        positive_token_id=token_by_key.get(positive_key),
+        negative_token_id=token_by_key.get(negative_key),
         liquidity=_num(raw.get("liquidityNum", raw.get("liquidity"))),
         volume=_num(raw.get("volumeNum", raw.get("volume"))),
         active=bool(raw.get("active", True)),
@@ -82,7 +90,6 @@ def normalize_market(raw: dict[str, Any]) -> Market | None:
 
 
 def fetch_market_by_id(market_id: str) -> Market:
-    """Fetch one market by Gamma market ID, including closed/resolved markets."""
     response = requests.get(f"{GAMMA}/markets/{market_id}", timeout=20)
     response.raise_for_status()
     payload = response.json()
@@ -95,7 +102,6 @@ def fetch_market_by_id(market_id: str) -> Market:
 
 
 def fetch_market_by_slug(slug: str) -> Market:
-    """Fetch one market by Gamma slug."""
     response = requests.get(f"{GAMMA}/markets/slug/{slug}", timeout=20)
     response.raise_for_status()
     payload = response.json()
@@ -108,7 +114,6 @@ def fetch_market_by_slug(slug: str) -> Market:
 
 
 def btc_15m_slug(now: datetime | None = None) -> tuple[str, datetime, datetime]:
-    """Return the slug and UTC boundaries for the currently active BTC 15m window."""
     current = now or datetime.now(timezone.utc)
     if current.tzinfo is None:
         current = current.replace(tzinfo=timezone.utc)
@@ -120,7 +125,6 @@ def btc_15m_slug(now: datetime | None = None) -> tuple[str, datetime, datetime]:
 
 
 def fetch_current_btc_15m_market(now: datetime | None = None) -> Market:
-    """Fetch the currently active Polymarket Bitcoin Up/Down 15-minute market."""
     slug, _, end = btc_15m_slug(now)
     try:
         market = fetch_market_by_slug(slug)
@@ -131,8 +135,8 @@ def fetch_current_btc_15m_market(now: datetime | None = None) -> Market:
             ) from exc
         raise
 
-    # The slug encodes the exact 15-minute start time. Use it as the precise local
-    # boundary even if Gamma's generic endDate is rounded or delayed.
+    if not market.positive_token_id or not market.negative_token_id:
+        raise RuntimeError("BTC 15m market is missing CLOB token IDs.")
     return market.model_copy(update={"end_date": end})
 
 
@@ -141,7 +145,6 @@ def fetch_markets(
     s: Settings = SETTINGS,
     now: datetime | None = None,
 ) -> list[Market]:
-    """Fetch active Polymarket markets inside the configured resolution window."""
     current = now or datetime.now(timezone.utc)
     if current.tzinfo is None:
         current = current.replace(tzinfo=timezone.utc)
