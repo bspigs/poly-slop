@@ -70,6 +70,19 @@ def normalize_market(raw: dict[str, Any]) -> Market | None:
     )
 
 
+def fetch_market_by_id(market_id: str) -> Market:
+    """Fetch one market by Gamma market ID, including closed/resolved markets."""
+    response = requests.get(f"{GAMMA}/markets/{market_id}", timeout=20)
+    response.raise_for_status()
+    payload = response.json()
+    if not isinstance(payload, dict):
+        raise ValueError(f"Unexpected market payload for {market_id}")
+    market = normalize_market(payload)
+    if market is None:
+        raise ValueError(f"Could not normalize market {market_id}")
+    return market
+
+
 def fetch_markets(
     limit: int = 100,
     s: Settings = SETTINGS,
