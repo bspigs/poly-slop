@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from rich.console import Console
 from rich.table import Table
 
-from .btc_multi import run_multi_scalp_loop
+from .btc_multi import render_v2_report, run_multi_scalp_loop
 from .btc_scalper import render_scalp_report, scalp_one_current_window
 from .config import SETTINGS
 from .paper import already_traded_market, record
@@ -145,12 +145,12 @@ def cli() -> None:
     parser.add_argument(
         "--btc-scalp",
         action="store_true",
-        help="Paper scalp the current BTC 15-minute market once and exit early using live CLOB bids",
+        help="Legacy one-off Ollama BTC paper scalp",
     )
     parser.add_argument(
         "--btc-scalp-loop",
         action="store_true",
-        help="Continuously paper scalp repeatedly inside each BTC 15-minute window",
+        help="Run BTC v2 microstructure paper scalper; LLM does not choose direction",
     )
     parser.add_argument(
         "--btc-15m-loop",
@@ -160,13 +160,14 @@ def cli() -> None:
     parser.add_argument(
         "--btc-scalp-report",
         action="store_true",
-        help="Show fee-aware realized results for BTC 15-minute scalps",
+        help="Show overall BTC scalp ledger plus separate v2 microstructure results",
     )
     parser.add_argument("--demo", action="store_true")
     args = parser.parse_args()
 
     if args.btc_scalp_report:
         render_scalp_report(console)
+        render_v2_report(console)
         return
     if args.report:
         render_report(console)
