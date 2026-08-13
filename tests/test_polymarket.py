@@ -9,6 +9,7 @@ def test_normalize_gamma_market():
         "question": "Will X happen?",
         "outcomes": '["Yes", "No"]',
         "outcomePrices": '["0.42", "0.58"]',
+        "clobTokenIds": '["yes-token", "no-token"]',
         "liquidityNum": 50000,
         "volumeNum": 100000,
         "active": True,
@@ -20,6 +21,8 @@ def test_normalize_gamma_market():
     assert market.no_price == 0.58
     assert market.positive_label == "YES"
     assert market.negative_label == "NO"
+    assert market.positive_token_id == "yes-token"
+    assert market.negative_token_id == "no-token"
 
 
 def test_normalize_btc_up_down_market():
@@ -29,6 +32,7 @@ def test_normalize_btc_up_down_market():
         "slug": "btc-updown-15m-1786588200",
         "outcomes": '["Up", "Down"]',
         "outcomePrices": '["0.57", "0.43"]',
+        "clobTokenIds": '["up-token", "down-token"]',
         "liquidityNum": 25000,
         "volumeNum": 50000,
         "active": True,
@@ -40,6 +44,8 @@ def test_normalize_btc_up_down_market():
     assert market.no_price == 0.43
     assert market.positive_label == "UP"
     assert market.negative_label == "DOWN"
+    assert market.positive_token_id == "up-token"
+    assert market.negative_token_id == "down-token"
 
 
 def test_btc_15m_slug_floors_to_current_window():
