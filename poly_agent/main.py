@@ -6,8 +6,9 @@ from datetime import datetime, timezone
 from rich.console import Console
 from rich.table import Table
 
-from .btc_multi import render_v2_report, run_multi_scalp_loop
+from .btc_multi import render_v2_report
 from .btc_scalper import render_scalp_report, scalp_one_current_window
+from .btc_v3 import render_v3_report, run_v3_loop
 from .config import SETTINGS
 from .paper import already_traded_market, record
 from .polymarket import fetch_current_btc_15m_market, fetch_markets, load_markets_from_file
@@ -150,7 +151,7 @@ def cli() -> None:
     parser.add_argument(
         "--btc-scalp-loop",
         action="store_true",
-        help="Run BTC v2 microstructure paper scalper; LLM does not choose direction",
+        help="Run BTC v3 1 Hz Chainlink maker/arbitrage paper engine",
     )
     parser.add_argument(
         "--btc-15m-loop",
@@ -160,7 +161,7 @@ def cli() -> None:
     parser.add_argument(
         "--btc-scalp-report",
         action="store_true",
-        help="Show overall BTC scalp ledger plus separate v2 microstructure results",
+        help="Show legacy BTC ledgers plus the clean v3 maker/arbitrage scoreboard",
     )
     parser.add_argument("--demo", action="store_true")
     args = parser.parse_args()
@@ -168,12 +169,13 @@ def cli() -> None:
     if args.btc_scalp_report:
         render_scalp_report(console)
         render_v2_report(console)
+        render_v3_report(console)
         return
     if args.report:
         render_report(console)
         return
     if args.btc_scalp_loop or args.btc_15m_loop:
-        run_multi_scalp_loop(provider=args.provider, console=console)
+        run_v3_loop(console=console)
         return
     if args.btc_scalp:
         try:
