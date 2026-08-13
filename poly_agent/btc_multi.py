@@ -9,6 +9,7 @@ from rich.console import Console
 
 from .btc_feed import RobustCoinbaseSpotFeed, WindowOpenUnavailable
 from .btc_scalper import (
+    EmptyOrderBook,
     ScalpTrade,
     current_paper_equity,
     load_scalps,
@@ -145,6 +146,7 @@ def run_multi_scalp_loop(
     last_signal_line = ""
     last_signal_print = 0.0
     last_open_wait_print = 0.0
+    last_book_wait_print = 0.0
 
     try:
         while True:
@@ -233,6 +235,14 @@ def run_multi_scalp_loop(
                         "[dim]Waiting for Coinbase to publish the exact BTC window-open candle…[/dim]"
                     )
                     last_open_wait_print = now_mono
+                time.sleep(max(s.btc_signal_poll_seconds, 1.0))
+            except EmptyOrderBook:
+                now_mono = time.monotonic()
+                if now_mono - last_book_wait_print >= 10:
+                    console.print(
+                        "[dim]SIGNAL: PASS | Polymarket CLOB has no executable two-sided book yet; waiting for liquidity…[/dim]"
+                    )
+                    last_book_wait_print = now_mono
                 time.sleep(max(s.btc_signal_poll_seconds, 1.0))
             except Exception as exc:
                 console.print(f"[yellow]V2 loop error:[/yellow] {exc}")
