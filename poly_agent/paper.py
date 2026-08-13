@@ -46,6 +46,8 @@ def record(decision: TradeDecision, *, allow_duplicate: bool = False) -> PaperPo
         stake=decision.stake,
         shares=shares,
         estimated_edge=decision.edge,
+        positive_label=decision.positive_label,
+        negative_label=decision.negative_label,
     )
     LEDGER.parent.mkdir(parents=True, exist_ok=True)
     with LEDGER.open("a", encoding="utf-8") as f:
