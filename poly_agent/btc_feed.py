@@ -1,10 +1,14 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import requests
 
 from .btc_signal import COINBASE, CoinbaseSpotFeed
+
+
+class WindowOpenUnavailable(RuntimeError):
+    """Raised when Coinbase has not published the exact window-open candle yet."""
 
 
 class RobustCoinbaseSpotFeed(CoinbaseSpotFeed):
@@ -12,10 +16,21 @@ class RobustCoinbaseSpotFeed(CoinbaseSpotFeed):
 
     Coinbase documents that historic candle data may be incomplete. The old
     implementation requested exactly one 60-second bucket and treated an empty
-    response as fatal. This implementation asks for the recent candle set,
-    chooses the exact window-open bucket when available, and only uses a live
-    sample fallback when that sample is genuinely close to the window open.
+    response as fatal. This implementation asks for a broad recent candle set,
+    then a padded range around the target minute, and only uses a live sample
+    fallback when that sample was captured very close to the window boundary.
     """
+
+    @staticmethod
+    def _parsed_rows(rows: object) -> list[list[object]]:
+        if not isinstance(rows, list):
+            return []
+        return [row for row in rows if isinstance(row, list) and len(row) >= 5]
+
+    @staticmethod
+    def _exact_open(rows: list[list[object]], key: int) -> float | None:
+        row = next((row for row in rows if int(row[0]) == key), None)
+        return None if row is None else float(row[3])
 
     def window_open_price(self, start: datetime) -> float:
         if start.tzinfo is None:
@@ -26,9 +41,9 @@ class RobustCoinbaseSpotFeed(CoinbaseSpotFeed):
         if key in self._open_cache:
             return self._open_cache[key]
 
-        # Coinbase's Exchange candles endpoint returns a recent range when
-        # start/end are omitted. This is much more reliable than asking for one
-        # exact, possibly still-forming one-minute bucket.
+        # First try Coinbase's default recent history. With start/end omitted,
+        # Coinbase selects a range ending now, which is more tolerant than a
+        # one-bucket request for a candle that may still be forming.
         response = requests.get(
             f"{COINBASE}/products/BTC-USD/candles",
             params={"granularity": 60},
@@ -36,25 +51,17 @@ class RobustCoinbaseSpotFeed(CoinbaseSpotFeed):
             timeout=10,
         )
         response.raise_for_status()
-        rows = response.json()
-        parsed = [
-            row
-            for row in rows
-            if isinstance(row, list) and len(row) >= 5
-        ] if isinstance(rows, list) else []
-
-        exact = next((row for row in parsed if int(row[0]) == key), None)
-        if exact is not None:
-            price = float(exact[3])
+        price = self._exact_open(self._parsed_rows(response.json()), key)
+        if price is not None:
             self._open_cache[key] = price
             return price
 
-        # A second, padded request helps when Coinbase's default recent range is
-        # lagging or ordered unexpectedly. We still require the exact bucket.
+        # Then ask for a padded range around the target minute. Coinbase may
+        # include buckets before the declared start, so we still select by exact
+        # timestamp rather than trusting response order.
         now = datetime.now(timezone.utc)
-        padded_end = max(now, start)
-        padded_start = start.replace(second=0, microsecond=0)
-        padded_start = padded_start.fromtimestamp(key - 5 * 60, timezone.utc)
+        padded_start = start - timedelta(minutes=5)
+        padded_end = max(now, start + timedelta(minutes=1))
         response = requests.get(
             f"{COINBASE}/products/BTC-USD/candles",
             params={
@@ -66,21 +73,14 @@ class RobustCoinbaseSpotFeed(CoinbaseSpotFeed):
             timeout=10,
         )
         response.raise_for_status()
-        rows = response.json()
-        parsed = [
-            row
-            for row in rows
-            if isinstance(row, list) and len(row) >= 5
-        ] if isinstance(rows, list) else []
-        exact = next((row for row in parsed if int(row[0]) == key), None)
-        if exact is not None:
-            price = float(exact[3])
+        price = self._exact_open(self._parsed_rows(response.json()), key)
+        if price is not None:
             self._open_cache[key] = price
             return price
 
-        # If the process was already alive right around the boundary, its first
-        # live ticker sample is a safe proxy. Do not use a sample captured far
-        # into the window because that would bias the signal.
+        # If this process was already sampling right around the boundary, use
+        # that observation as a close proxy. Never substitute a sample captured
+        # deep into the window because that would bias P(up/down).
         near_open = [
             sample
             for sample in self.samples
@@ -91,7 +91,6 @@ class RobustCoinbaseSpotFeed(CoinbaseSpotFeed):
             self._open_cache[key] = price
             return price
 
-        # This is temporary, not fatal. The v2 loop will wait and try again.
-        raise RuntimeError(
-            "BTC window-open candle is not available from Coinbase yet; waiting for it to publish."
+        raise WindowOpenUnavailable(
+            "Coinbase has not published the exact BTC window-open candle yet."
         )
