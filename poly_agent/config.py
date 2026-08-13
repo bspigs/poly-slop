@@ -37,15 +37,18 @@ class Settings:
     baseline_position_pct: float = _f("BASELINE_POSITION_PCT", 0.0025)
     starting_bankroll: float = _f("STARTING_BANKROLL", 10_000)
 
-    # BTC 15-minute scalp paper simulator. These are intentionally explicit so
-    # we can tune the experiment without changing code.
+    # BTC 15-minute scalp paper simulator. P&L thresholds are NET of estimated
+    # taker fees. The stop has a short grace period so normal entry noise does
+    # not instantly kill a position.
     btc_scalp_poll_seconds: float = _f("BTC_SCALP_POLL_SECONDS", 2.0)
-    btc_scalp_take_profit_usd: float = _f("BTC_SCALP_TAKE_PROFIT_USD", 0.25)
-    btc_scalp_trail_arm_usd: float = _f("BTC_SCALP_TRAIL_ARM_USD", 0.15)
-    btc_scalp_trail_giveback_usd: float = _f("BTC_SCALP_TRAIL_GIVEBACK_USD", 0.20)
-    btc_scalp_stop_loss_usd: float = _f("BTC_SCALP_STOP_LOSS_USD", 3.00)
+    btc_scalp_take_profit_usd: float = _f("BTC_SCALP_TAKE_PROFIT_USD", 0.05)
+    btc_scalp_trail_arm_usd: float = _f("BTC_SCALP_TRAIL_ARM_USD", 0.04)
+    btc_scalp_trail_giveback_usd: float = _f("BTC_SCALP_TRAIL_GIVEBACK_USD", 0.02)
+    btc_scalp_stop_loss_usd: float = _f("BTC_SCALP_STOP_LOSS_USD", 0.75)
+    btc_scalp_stop_grace_seconds: int = _i("BTC_SCALP_STOP_GRACE_SECONDS", 45)
     btc_scalp_force_exit_seconds: int = _i("BTC_SCALP_FORCE_EXIT_SECONDS", 20)
     btc_scalp_min_entry_seconds: int = _i("BTC_SCALP_MIN_ENTRY_SECONDS", 30)
+    btc_clob_wait_seconds: int = _i("BTC_CLOB_WAIT_SECONDS", 20)
     btc_crypto_taker_fee_rate: float = _f("BTC_CRYPTO_TAKER_FEE_RATE", 0.07)
 
 
