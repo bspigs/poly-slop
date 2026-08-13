@@ -29,6 +29,8 @@ class Settings:
     min_volume: float = _f("MIN_VOLUME", 10_000)
     min_market_price: float = _f("MIN_MARKET_PRICE", 0.08)
     max_market_price: float = _f("MAX_MARKET_PRICE", 0.92)
+    min_days_to_resolution: float = _f("MIN_DAYS_TO_RESOLUTION", 0.0)
+    max_days_to_resolution: float = _f("MAX_DAYS_TO_RESOLUTION", 7.0)
     min_edge: float = _f("MIN_EDGE", 0.08)
     min_confidence: float = _f("MIN_CONFIDENCE", 0.60)
     max_position_pct: float = _f("MAX_POSITION_PCT", 0.01)
