@@ -50,30 +50,29 @@ class Settings:
     btc_clob_wait_seconds: int = _i("BTC_CLOB_WAIT_SECONDS", 20)
     btc_crypto_taker_fee_rate: float = _f("BTC_CRYPTO_TAKER_FEE_RATE", 0.07)
 
-    # BTC v2 microstructure / momentum signal. The signal estimates the chance
-    # of finishing above the window-open BTC/USD price from distance-to-open and
-    # realized volatility, then requires short-horizon momentum and executable
-    # Polymarket economics to agree before a paper entry is allowed.
-    btc_signal_warmup_seconds: int = _i("BTC_SIGNAL_WARMUP_SECONDS", 35)
+    # BTC v2 microstructure / momentum signal. These defaults are intentionally
+    # permissive enough to generate a paper sample while retaining PASS gates
+    # for flat momentum, poor pricing, wide spreads, and thin books.
+    btc_signal_warmup_seconds: int = _i("BTC_SIGNAL_WARMUP_SECONDS", 20)
     btc_signal_poll_seconds: float = _f("BTC_SIGNAL_POLL_SECONDS", 1.0)
-    btc_signal_reentry_cooldown_seconds: float = _f("BTC_SIGNAL_REENTRY_COOLDOWN_SECONDS", 5.0)
-    btc_signal_min_momentum_bps: float = _f("BTC_SIGNAL_MIN_MOMENTUM_BPS", 2.0)
-    btc_signal_momentum_scale_bps: float = _f("BTC_SIGNAL_MOMENTUM_SCALE_BPS", 5.0)
+    btc_signal_reentry_cooldown_seconds: float = _f("BTC_SIGNAL_REENTRY_COOLDOWN_SECONDS", 3.0)
+    btc_signal_min_momentum_bps: float = _f("BTC_SIGNAL_MIN_MOMENTUM_BPS", 0.75)
+    btc_signal_momentum_scale_bps: float = _f("BTC_SIGNAL_MOMENTUM_SCALE_BPS", 4.0)
     btc_signal_max_momentum_probability_boost: float = _f(
         "BTC_SIGNAL_MAX_MOMENTUM_PROBABILITY_BOOST", 0.04
     )
-    btc_signal_max_adverse_accel_bps: float = _f("BTC_SIGNAL_MAX_ADVERSE_ACCEL_BPS", 4.0)
-    btc_signal_min_fair_probability: float = _f("BTC_SIGNAL_MIN_FAIR_PROBABILITY", 0.58)
-    btc_signal_min_fee_adjusted_edge: float = _f("BTC_SIGNAL_MIN_FEE_ADJUSTED_EDGE", 0.025)
-    btc_signal_max_spread: float = _f("BTC_SIGNAL_MAX_SPREAD", 0.03)
-    btc_signal_min_contract_price: float = _f("BTC_SIGNAL_MIN_CONTRACT_PRICE", 0.15)
-    btc_signal_max_contract_price: float = _f("BTC_SIGNAL_MAX_CONTRACT_PRICE", 0.85)
-    btc_signal_min_depth_multiple: float = _f("BTC_SIGNAL_MIN_DEPTH_MULTIPLE", 1.25)
+    btc_signal_max_adverse_accel_bps: float = _f("BTC_SIGNAL_MAX_ADVERSE_ACCEL_BPS", 6.0)
+    btc_signal_min_fair_probability: float = _f("BTC_SIGNAL_MIN_FAIR_PROBABILITY", 0.54)
+    btc_signal_min_fee_adjusted_edge: float = _f("BTC_SIGNAL_MIN_FEE_ADJUSTED_EDGE", 0.005)
+    btc_signal_max_spread: float = _f("BTC_SIGNAL_MAX_SPREAD", 0.05)
+    btc_signal_min_contract_price: float = _f("BTC_SIGNAL_MIN_CONTRACT_PRICE", 0.10)
+    btc_signal_max_contract_price: float = _f("BTC_SIGNAL_MAX_CONTRACT_PRICE", 0.90)
+    btc_signal_min_depth_multiple: float = _f("BTC_SIGNAL_MIN_DEPTH_MULTIPLE", 0.50)
     btc_signal_reversal_check_after_seconds: float = _f(
-        "BTC_SIGNAL_REVERSAL_CHECK_AFTER_SECONDS", 15.0
+        "BTC_SIGNAL_REVERSAL_CHECK_AFTER_SECONDS", 12.0
     )
     btc_signal_reversal_min_confidence: float = _f(
-        "BTC_SIGNAL_REVERSAL_MIN_CONFIDENCE", 0.62
+        "BTC_SIGNAL_REVERSAL_MIN_CONFIDENCE", 0.60
     )
 
 
