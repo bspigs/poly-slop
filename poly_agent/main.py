@@ -6,7 +6,8 @@ from datetime import datetime, timezone
 from rich.console import Console
 from rich.table import Table
 
-from .btc_scalper import render_scalp_report, run_scalp_loop, scalp_one_current_window
+from .btc_multi import run_multi_scalp_loop
+from .btc_scalper import render_scalp_report, scalp_one_current_window
 from .config import SETTINGS
 from .paper import already_traded_market, record
 from .polymarket import fetch_current_btc_15m_market, fetch_markets, load_markets_from_file
@@ -144,12 +145,12 @@ def cli() -> None:
     parser.add_argument(
         "--btc-scalp",
         action="store_true",
-        help="Paper scalp the current BTC 15-minute market and exit early using live CLOB bids",
+        help="Paper scalp the current BTC 15-minute market once and exit early using live CLOB bids",
     )
     parser.add_argument(
         "--btc-scalp-loop",
         action="store_true",
-        help="Continuously paper scalp one trade per BTC 15-minute window",
+        help="Continuously paper scalp repeatedly inside each BTC 15-minute window",
     )
     parser.add_argument(
         "--btc-15m-loop",
@@ -171,7 +172,7 @@ def cli() -> None:
         render_report(console)
         return
     if args.btc_scalp_loop or args.btc_15m_loop:
-        run_scalp_loop(provider=args.provider, console=console)
+        run_multi_scalp_loop(provider=args.provider, console=console)
         return
     if args.btc_scalp:
         try:
