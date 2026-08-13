@@ -34,6 +34,7 @@ class Settings:
     min_edge: float = _f("MIN_EDGE", 0.08)
     min_confidence: float = _f("MIN_CONFIDENCE", 0.60)
     max_position_pct: float = _f("MAX_POSITION_PCT", 0.01)
+    baseline_position_pct: float = _f("BASELINE_POSITION_PCT", 0.0025)
     starting_bankroll: float = _f("STARTING_BANKROLL", 10_000)
 
 
