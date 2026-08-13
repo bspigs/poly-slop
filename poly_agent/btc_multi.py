@@ -7,6 +7,7 @@ from pathlib import Path
 
 from rich.console import Console
 
+from .btc_feed import RobustCoinbaseSpotFeed, WindowOpenUnavailable
 from .btc_scalper import (
     ScalpTrade,
     current_paper_equity,
@@ -133,7 +134,7 @@ def run_multi_scalp_loop(
     """BTC v2: wait for measurable microstructure edge, then paper scalp it."""
     del provider  # v2 deliberately does not let the LLM choose trade direction.
     console = console or Console()
-    engine = BtcSignalEngine(s)
+    engine = BtcSignalEngine(s, feed=RobustCoinbaseSpotFeed())
     console.print(
         "[bold yellow]BTC 15M V2 MICROSTRUCTURE SCALPER - PAPER ONLY[/bold yellow] | "
         "Coinbase BTC spot + distance-to-window-open + realized vol + momentum + "
@@ -143,6 +144,7 @@ def run_multi_scalp_loop(
     current_market_id: str | None = None
     last_signal_line = ""
     last_signal_print = 0.0
+    last_open_wait_print = 0.0
 
     try:
         while True:
@@ -224,6 +226,14 @@ def run_multi_scalp_loop(
 
             except KeyboardInterrupt:
                 raise
+            except WindowOpenUnavailable:
+                now_mono = time.monotonic()
+                if now_mono - last_open_wait_print >= 10:
+                    console.print(
+                        "[dim]Waiting for Coinbase to publish the exact BTC window-open candle…[/dim]"
+                    )
+                    last_open_wait_print = now_mono
+                time.sleep(max(s.btc_signal_poll_seconds, 1.0))
             except Exception as exc:
                 console.print(f"[yellow]V2 loop error:[/yellow] {exc}")
                 time.sleep(2)
