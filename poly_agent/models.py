@@ -15,6 +15,8 @@ class Market(BaseModel):
     no_price: float = Field(ge=0, le=1)
     positive_label: str = "YES"
     negative_label: str = "NO"
+    positive_token_id: str | None = None
+    negative_token_id: str | None = None
     liquidity: float = 0
     volume: float = 0
     active: bool = True
