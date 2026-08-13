@@ -17,7 +17,8 @@ from .btc_scalper import (
     recover_expired_open_scalps,
     scalp_metrics,
 )
-from .btc_signal import BtcSignal, BtcSignalEngine, manage_signal_scalp, open_signal_scalp
+from .btc_signal import BtcSignal, manage_signal_scalp, open_signal_scalp
+from .btc_tick import BtcTickEngine
 from .config import SETTINGS, Settings
 from .polymarket import btc_15m_slug, fetch_current_btc_15m_market
 
@@ -101,7 +102,7 @@ def render_v2_report(console: Console | None = None, s: Settings = SETTINGS) -> 
     console = console or Console()
     recover_expired_open_scalps(console)
     metrics = _v2_metrics(s)
-    console.print("\n[bold]POLY SLUDGE BTC V2 MICROSTRUCTURE SCOREBOARD[/bold]")
+    console.print("\n[bold]POLY SLUDGE BTC V2 1HZ SLIP-SCANNER SCOREBOARD[/bold]")
     console.print(
         f"Trades {metrics['trades']} | Closed {metrics['closed']} | "
         f"{metrics['wins']}W/{metrics['losses']}L | hit {float(metrics['hit_rate']):.1%}"
@@ -132,19 +133,17 @@ def run_multi_scalp_loop(
     s: Settings = SETTINGS,
     console: Console | None = None,
 ) -> None:
-    """BTC v2: wait for measurable microstructure edge, then paper scalp it."""
-    del provider  # v2 deliberately does not let the LLM choose trade direction.
+    """BTC v2 tick mode: scan both outcome books every second for paper slips."""
+    del provider  # BTC tick mode does not let an LLM choose trade direction.
     console = console or Console()
-    engine = BtcSignalEngine(s, feed=RobustCoinbaseSpotFeed())
+    engine = BtcTickEngine(s, feed=RobustCoinbaseSpotFeed())
     console.print(
-        "[bold yellow]BTC 15M V2 MICROSTRUCTURE SCALPER - PAPER ONLY[/bold yellow] | "
-        "Coinbase BTC spot + distance-to-window-open + realized vol + momentum + "
-        "Polymarket spread/fee/depth gates. PASS is expected. Ctrl+C stops immediately."
+        "[bold yellow]BTC 15M V2 1HZ SLIP SCANNER - PAPER ONLY[/bold yellow] | "
+        "every second: BTC spot -> fair probability -> BOTH Polymarket books -> best executable side. "
+        "Momentum is advisory, not a hard gate. Ctrl+C stops."
     )
 
     current_market_id: str | None = None
-    last_signal_line = ""
-    last_signal_print = 0.0
     last_open_wait_print = 0.0
     last_book_wait_print = 0.0
 
@@ -158,7 +157,6 @@ def run_multi_scalp_loop(
 
                 if market.id != current_market_id:
                     current_market_id = market.id
-                    last_signal_line = ""
                     console.print(
                         f"\n[bold]NEW BTC 15M WINDOW[/bold] | {market.question} | "
                         f"{max(seconds_left, 0):.0f}s remaining"
@@ -176,7 +174,7 @@ def run_multi_scalp_loop(
                             console=console,
                         )
                     else:
-                        console.print("[yellow]Finishing a legacy v1 paper position before v2 can enter.[/yellow]")
+                        console.print("[yellow]Finishing a legacy v1 paper position before tick mode can enter.[/yellow]")
                         result = manage_scalp(existing, s=s, console=console)
                     if result.status == "CLOSED":
                         render_v2_report(console, s)
@@ -184,7 +182,7 @@ def run_multi_scalp_loop(
                     continue
 
                 if seconds_left < s.btc_scalp_min_entry_seconds:
-                    sleep_for = max(seconds_left + 2, 2)
+                    sleep_for = max(seconds_left + 1, 1)
                     console.print(
                         f"[dim]Entry cutoff reached ({seconds_left:.0f}s left). "
                         f"Waiting {sleep_for:.0f}s for next window…[/dim]"
@@ -192,62 +190,57 @@ def run_multi_scalp_loop(
                     time.sleep(sleep_for)
                     continue
 
+                tick_started = time.monotonic()
                 signal = engine.evaluate(market, window_start, window_end)
-                line = _signal_text(signal)
-                now_mono = time.monotonic()
-                if line != last_signal_line or now_mono - last_signal_print >= 10:
-                    style = "bold green" if signal.action != "PASS" else "dim"
-                    console.print(f"[{style}]SIGNAL:[/{style}] {line}")
-                    last_signal_line = line
-                    last_signal_print = now_mono
+                style = "bold green" if signal.action != "PASS" else "dim"
+                console.print(f"[{style}]TICK:[/{style}] {_signal_text(signal)}")
 
-                if signal.action == "PASS":
-                    time.sleep(max(s.btc_signal_poll_seconds, 0.5))
+                if signal.action != "PASS":
+                    trade = open_signal_scalp(market, signal, s=s, console=console)
+                    _record_v2_id(trade, signal)
+                    result = manage_signal_scalp(
+                        trade,
+                        market,
+                        window_start,
+                        engine,
+                        s=s,
+                        console=console,
+                    )
+                    if result.status == "CLOSED":
+                        v2 = render_v2_report(console, s)
+                        overall = scalp_metrics(load_scalps(), s)
+                        console.print(
+                            f"[dim]Control + v2 ledger: {overall['wins']}W/{overall['losses']}L | "
+                            f"net ${float(overall['net_pnl']):+,.2f}. "
+                            f"V2 alone: {v2['wins']}W/{v2['losses']}L | "
+                            f"net ${float(v2['net_pnl']):+,.2f}.[/dim]"
+                        )
+                        time.sleep(s.btc_signal_reentry_cooldown_seconds)
                     continue
 
-                trade = open_signal_scalp(market, signal, s=s, console=console)
-                _record_v2_id(trade, signal)
-                result = manage_signal_scalp(
-                    trade,
-                    market,
-                    window_start,
-                    engine,
-                    s=s,
-                    console=console,
-                )
-                if result.status == "CLOSED":
-                    v2 = render_v2_report(console, s)
-                    overall = scalp_metrics(load_scalps(), s)
-                    console.print(
-                        f"[dim]Control + v2 ledger: {overall['wins']}W/{overall['losses']}L | "
-                        f"net ${float(overall['net_pnl']):+,.2f}. "
-                        f"V2 alone: {v2['wins']}W/{v2['losses']}L | "
-                        f"net ${float(v2['net_pnl']):+,.2f}.[/dim]"
-                    )
-                    time.sleep(s.btc_signal_reentry_cooldown_seconds)
+                # Keep the ENTRY scanner at roughly 1 Hz, accounting for API latency.
+                elapsed = time.monotonic() - tick_started
+                time.sleep(max(s.btc_signal_poll_seconds - elapsed, 0.0))
 
             except KeyboardInterrupt:
                 raise
             except WindowOpenUnavailable:
                 now_mono = time.monotonic()
-                if now_mono - last_open_wait_print >= 10:
-                    console.print(
-                        "[dim]Waiting for Coinbase to publish the exact BTC window-open candle…[/dim]"
-                    )
+                if now_mono - last_open_wait_print >= 5:
+                    console.print("[dim]TICK: waiting for BTC window-open reference…[/dim]")
                     last_open_wait_print = now_mono
-                time.sleep(max(s.btc_signal_poll_seconds, 1.0))
+                time.sleep(1.0)
             except EmptyOrderBook:
+                # The book can disappear between signal evaluation and simulated fill.
                 now_mono = time.monotonic()
-                if now_mono - last_book_wait_print >= 10:
-                    console.print(
-                        "[dim]SIGNAL: PASS | Polymarket CLOB has no executable two-sided book yet; waiting for liquidity…[/dim]"
-                    )
+                if now_mono - last_book_wait_print >= 5:
+                    console.print("[dim]TICK: executable book vanished before fill; rescanning…[/dim]")
                     last_book_wait_print = now_mono
-                time.sleep(max(s.btc_signal_poll_seconds, 1.0))
+                time.sleep(1.0)
             except Exception as exc:
-                console.print(f"[yellow]V2 loop error:[/yellow] {exc}")
-                time.sleep(2)
+                console.print(f"[yellow]V2 tick error:[/yellow] {exc}")
+                time.sleep(1.0)
 
     except KeyboardInterrupt:
-        console.print("\n[bold]BTC v2 loop stopped.[/bold]")
+        console.print("\n[bold]BTC v2 tick loop stopped.[/bold]")
         render_v2_report(console, s)
