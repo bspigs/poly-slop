@@ -9,8 +9,29 @@ from .models import PaperPosition, TradeDecision
 LEDGER = Path("data/paper_trades.jsonl")
 
 
-def record(decision: TradeDecision) -> PaperPosition | None:
+def load_positions() -> list[PaperPosition]:
+    if not LEDGER.exists():
+        return []
+
+    positions: list[PaperPosition] = []
+    with LEDGER.open("r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            positions.append(PaperPosition.model_validate(json.loads(line)))
+    return positions
+
+
+def already_traded_market(market_id: str) -> bool:
+    return any(position.market_id == market_id for position in load_positions())
+
+
+def record(decision: TradeDecision, *, allow_duplicate: bool = False) -> PaperPosition | None:
     if decision.side == "PASS" or decision.stake <= 0:
+        return None
+
+    if not allow_duplicate and already_traded_market(decision.market_id):
         return None
 
     shares = decision.stake / decision.market_price
