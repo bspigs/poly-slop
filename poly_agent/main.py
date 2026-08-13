@@ -1,13 +1,20 @@
 from __future__ import annotations
 
 import argparse
+import time
+from datetime import datetime, timezone
 
 from rich.console import Console
 from rich.table import Table
 
 from .config import SETTINGS
 from .paper import already_traded_market, record
-from .polymarket import fetch_markets, load_markets_from_file
+from .polymarket import (
+    btc_15m_slug,
+    fetch_current_btc_15m_market,
+    fetch_markets,
+    load_markets_from_file,
+)
 from .report import render_report
 from .research import ResearchProviderError, estimate_probability, resolve_provider
 from .risk import decide_baseline_trade, decide_trade
@@ -16,16 +23,49 @@ from .scanner import days_to_resolution, rank_markets
 console = Console()
 
 
+def _side_label(side: str, positive_label: str, negative_label: str) -> str:
+    if side == "YES":
+        return positive_label
+    if side == "NO":
+        return negative_label
+    return side
+
+
+def _resolves_text(market, demo: bool = False) -> str:
+    if demo:
+        return "demo"
+    if market.end_date is None:
+        return "?"
+    now = datetime.now(timezone.utc)
+    end = market.end_date
+    if end.tzinfo is None:
+        end = end.replace(tzinfo=timezone.utc)
+    seconds = max((end - now).total_seconds(), 0)
+    if seconds <= 3600:
+        return f"{seconds / 60:.1f}m"
+    days = days_to_resolution(market)
+    return f"{days:.1f}d" if days is not None else "?"
+
+
 def run(
     max_research: int = 5,
     execute_paper: bool = False,
     baseline_paper: bool = False,
     demo: bool = False,
     provider: str | None = None,
+    btc_15m: bool = False,
 ) -> None:
     if demo:
         console.print("[bold]Loading synthetic demo markets…[/bold]")
         markets = load_markets_from_file("data/demo_markets.json")
+    elif btc_15m:
+        console.print("[bold]Fetching current Bitcoin Up/Down 15-minute market…[/bold]")
+        try:
+            market = fetch_current_btc_15m_market()
+            markets = [market]
+        except Exception as exc:
+            console.print(f"[red]BTC 15m fetch failed:[/red] {exc}")
+            return
     else:
         console.print("[bold]Fetching Polymarket markets…[/bold]")
         console.print(
@@ -39,20 +79,18 @@ def run(
             console.print("Run `python -m poly_agent.main --demo --research 0` to verify the local scanner without network access.")
             return
 
-    ranked = rank_markets(markets, enforce_resolution_window=not demo)
+    ranked = markets if btc_15m else rank_markets(markets, enforce_resolution_window=not demo)
 
-    table = Table(title="Top Scanner Candidates")
-    table.add_column("YES")
+    table = Table(title="BTC 15m Candidate" if btc_15m else "Top Scanner Candidates")
+    table.add_column("Price")
     table.add_column("Resolves")
     table.add_column("Liquidity")
     table.add_column("Volume")
     table.add_column("Question")
     for m in ranked[:15]:
-        days = days_to_resolution(m)
-        resolves = "demo" if demo else (f"{days:.1f}d" if days is not None else "?")
         table.add_row(
-            f"{m.yes_price:.1%}",
-            resolves,
+            f"{m.positive_label} {m.yes_price:.1%}",
+            _resolves_text(m, demo),
             f"${m.liquidity:,.0f}",
             f"${m.volume:,.0f}",
             m.question,
@@ -60,7 +98,7 @@ def run(
     console.print(table)
 
     if not ranked:
-        if not demo:
+        if not demo and not btc_15m:
             console.print(
                 "[yellow]No markets passed the current short-term filters. "
                 "Increase MAX_DAYS_TO_RESOLUTION in .env if needed.[/yellow]"
@@ -102,7 +140,7 @@ def run(
         if skipped:
             console.print(f"[dim]Skipped {skipped} market(s) already in the paper ledger.[/dim]")
         if not research_queue:
-            console.print("[yellow]All current candidate markets are already in the paper ledger.[/yellow]")
+            console.print("[yellow]Current market is already in the paper ledger.[/yellow]")
             return
 
     bankroll = SETTINGS.starting_bankroll
@@ -120,9 +158,13 @@ def run(
             if baseline_paper
             else decide_trade(market, estimate, bankroll)
         )
+        decision_label = _side_label(
+            decision.side, decision.positive_label, decision.negative_label
+        )
         console.print(
-            f"Market YES {market.yes_price:.1%} | fair YES {estimate.fair_yes_probability:.1%} | "
-            f"confidence {estimate.confidence:.0%} | decision [bold]{decision.side}[/bold] | "
+            f"Market {market.positive_label} {market.yes_price:.1%} | "
+            f"fair {market.positive_label} {estimate.fair_yes_probability:.1%} | "
+            f"confidence {estimate.confidence:.0%} | decision [bold]{decision_label}[/bold] | "
             f"edge {decision.edge:.1%} | stake ${decision.stake:,.2f}"
         )
         console.print(estimate.thesis)
@@ -130,12 +172,57 @@ def run(
         if execute_paper or baseline_paper:
             position = record(decision)
             if position:
+                position_label = _side_label(
+                    position.side, position.positive_label, position.negative_label
+                )
                 console.print(
-                    f"[green]PAPER TRADE EXECUTED: {position.side} "
+                    f"[green]PAPER TRADE EXECUTED: {position_label} "
                     f"${position.stake:,.2f} at {position.entry_price:.1%}[/green]"
                 )
             else:
                 console.print("[yellow]No paper trade recorded for this market.[/yellow]")
+
+
+def run_btc_15m_loop(provider: str | None = None) -> None:
+    """Continuously take one baseline paper position in each BTC 15-minute window."""
+    console.print(
+        "[bold yellow]BTC 15-MINUTE LOOP[/bold yellow] - PAPER MONEY ONLY. "
+        "Press Ctrl+C to stop."
+    )
+    try:
+        while True:
+            try:
+                market = fetch_current_btc_15m_market()
+            except Exception as exc:
+                console.print(f"[yellow]Waiting for BTC 15m market:[/yellow] {exc}")
+                time.sleep(5)
+                continue
+
+            if not already_traded_market(market.id):
+                render_report(console)
+                run(
+                    max_research=1,
+                    baseline_paper=True,
+                    provider=provider,
+                    btc_15m=True,
+                )
+            else:
+                console.print(
+                    f"[dim]Already traded current window: {market.question}[/dim]"
+                )
+
+            now = datetime.now(timezone.utc)
+            end = market.end_date or btc_15m_slug(now)[2]
+            if end.tzinfo is None:
+                end = end.replace(tzinfo=timezone.utc)
+            sleep_seconds = max((end - now).total_seconds() + 5, 5)
+            console.print(
+                f"[dim]Waiting {sleep_seconds / 60:.1f} minutes for the next BTC window…[/dim]"
+            )
+            time.sleep(sleep_seconds)
+    except KeyboardInterrupt:
+        console.print("\n[bold]BTC 15-minute paper loop stopped.[/bold]")
+        render_report(console)
 
 
 def cli() -> None:
@@ -153,6 +240,16 @@ def cli() -> None:
         action="store_true",
         help="Check paper markets for resolution and show hit rate, P&L, ROI, and Brier score",
     )
+    parser.add_argument(
+        "--btc-15m",
+        action="store_true",
+        help="Target only the currently active Bitcoin Up/Down 15-minute market",
+    )
+    parser.add_argument(
+        "--btc-15m-loop",
+        action="store_true",
+        help="Continuously paper-trade one baseline position in every Bitcoin 15-minute window",
+    )
     parser.add_argument("--demo", action="store_true", help="Use bundled synthetic markets instead of the live API")
     args = parser.parse_args()
 
@@ -160,12 +257,17 @@ def cli() -> None:
         render_report(console)
         return
 
+    if args.btc_15m_loop:
+        run_btc_15m_loop(provider=args.provider)
+        return
+
     run(
-        max_research=args.research,
+        max_research=1 if args.btc_15m else args.research,
         execute_paper=args.paper,
         baseline_paper=args.paper_baseline,
         demo=args.demo,
         provider=args.provider,
+        btc_15m=args.btc_15m,
     )
 
 
