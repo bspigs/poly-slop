@@ -10,7 +10,7 @@ from .paper import record
 from .polymarket import fetch_markets, load_markets_from_file
 from .research import ResearchProviderError, estimate_probability, resolve_provider
 from .risk import decide_trade
-from .scanner import rank_markets
+from .scanner import days_to_resolution, rank_markets
 
 console = Console()
 
@@ -26,6 +26,10 @@ def run(
         markets = load_markets_from_file("data/demo_markets.json")
     else:
         console.print("[bold]Fetching Polymarket markets…[/bold]")
+        console.print(
+            f"[dim]Resolution window: {SETTINGS.min_days_to_resolution:g} to "
+            f"{SETTINGS.max_days_to_resolution:g} days[/dim]"
+        )
         try:
             markets = fetch_markets(limit=max(100, SETTINGS.max_markets * 4))
         except Exception as exc:
@@ -33,16 +37,33 @@ def run(
             console.print("Run `python -m poly_agent.main --demo --research 0` to verify the local scanner without network access.")
             return
 
-    ranked = rank_markets(markets)
+    ranked = rank_markets(markets, enforce_resolution_window=not demo)
 
     table = Table(title="Top Scanner Candidates")
     table.add_column("YES")
+    table.add_column("Resolves")
     table.add_column("Liquidity")
     table.add_column("Volume")
     table.add_column("Question")
     for m in ranked[:15]:
-        table.add_row(f"{m.yes_price:.1%}", f"${m.liquidity:,.0f}", f"${m.volume:,.0f}", m.question)
+        days = days_to_resolution(m)
+        resolves = "demo" if demo else (f"{days:.1f}d" if days is not None else "?")
+        table.add_row(
+            f"{m.yes_price:.1%}",
+            resolves,
+            f"${m.liquidity:,.0f}",
+            f"${m.volume:,.0f}",
+            m.question,
+        )
     console.print(table)
+
+    if not ranked:
+        if not demo:
+            console.print(
+                "[yellow]No markets passed the current short-term filters. "
+                "Increase MAX_DAYS_TO_RESOLUTION in .env if needed.[/yellow]"
+            )
+        return
 
     if max_research <= 0:
         return
