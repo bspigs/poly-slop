@@ -17,8 +17,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install -r requirements.txt
-      - run: pytest -q
+      - run: python -m pip install -r requirements.txt
+      - run: python -m pytest -q
       - name: Run keyless scanner
         run: python -m poly_agent.main --research 0
       - name: Run OpenAI research when configured
