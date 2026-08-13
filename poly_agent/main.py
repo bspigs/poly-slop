@@ -9,7 +9,7 @@ from .config import SETTINGS
 from .paper import record
 from .polymarket import fetch_markets, load_markets_from_file
 from .research import ResearchProviderError, estimate_probability, resolve_provider
-from .risk import decide_trade
+from .risk import decide_baseline_trade, decide_trade
 from .scanner import days_to_resolution, rank_markets
 
 console = Console()
@@ -18,6 +18,7 @@ console = Console()
 def run(
     max_research: int = 5,
     execute_paper: bool = False,
+    baseline_paper: bool = False,
     demo: bool = False,
     provider: str | None = None,
 ) -> None:
@@ -79,6 +80,20 @@ def run(
         return
 
     console.print(f"\n[bold]Research provider:[/bold] {selected_provider}")
+    if baseline_paper:
+        fake_stake = SETTINGS.starting_bankroll * min(
+            SETTINGS.baseline_position_pct, SETTINGS.max_position_pct
+        )
+        console.print(
+            f"[bold yellow]BASELINE PAPER MODE[/bold yellow] - simulation only; "
+            f"records one ${fake_stake:,.2f} paper position per researched market."
+        )
+    elif execute_paper:
+        console.print(
+            "[bold yellow]CONSERVATIVE PAPER MODE[/bold yellow] - simulation only; "
+            "records only trades that pass confidence/edge gates."
+        )
+
     bankroll = SETTINGS.starting_bankroll
 
     for market in ranked[:max_research]:
@@ -89,17 +104,27 @@ def run(
             console.print(f"[red]Research failed:[/red] {exc}")
             return
 
-        decision = decide_trade(market, estimate, bankroll)
+        decision = (
+            decide_baseline_trade(market, estimate, bankroll)
+            if baseline_paper
+            else decide_trade(market, estimate, bankroll)
+        )
         console.print(
             f"Market YES {market.yes_price:.1%} | fair YES {estimate.fair_yes_probability:.1%} | "
             f"confidence {estimate.confidence:.0%} | decision [bold]{decision.side}[/bold] | "
             f"edge {decision.edge:.1%} | stake ${decision.stake:,.2f}"
         )
         console.print(estimate.thesis)
-        if execute_paper:
+
+        if execute_paper or baseline_paper:
             position = record(decision)
             if position:
-                console.print(f"[green]Paper position recorded: {position.side} ${position.stake:,.2f}[/green]")
+                console.print(
+                    f"[green]PAPER TRADE EXECUTED: {position.side} "
+                    f"${position.stake:,.2f} at {position.entry_price:.1%}[/green]"
+                )
+            else:
+                console.print("[yellow]No paper trade recorded for this market.[/yellow]")
 
 
 def cli() -> None:
@@ -107,9 +132,20 @@ def cli() -> None:
     parser.add_argument("--research", type=int, default=5, help="How many top markets to research")
     parser.add_argument("--provider", choices=["auto", "openai", "ollama"], default=SETTINGS.research_provider)
     parser.add_argument("--paper", action="store_true", help="Record qualifying simulated trades")
+    parser.add_argument(
+        "--paper-baseline",
+        action="store_true",
+        help="Record a small fixed simulated trade for every researched market, bypassing normal confidence/edge gates",
+    )
     parser.add_argument("--demo", action="store_true", help="Use bundled synthetic markets instead of the live API")
     args = parser.parse_args()
-    run(max_research=args.research, execute_paper=args.paper, demo=args.demo, provider=args.provider)
+    run(
+        max_research=args.research,
+        execute_paper=args.paper,
+        baseline_paper=args.paper_baseline,
+        demo=args.demo,
+        provider=args.provider,
+    )
 
 
 if __name__ == "__main__":
