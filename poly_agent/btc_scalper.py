@@ -22,6 +22,10 @@ CLOB = "https://clob.polymarket.com"
 SCALP_LEDGER = Path("data/btc_scalps.jsonl")
 
 
+class EmptyOrderBook(RuntimeError):
+    """Raised when the selected token has no executable bid and/or ask."""
+
+
 class ScalpTrade(BaseModel):
     trade_id: str = Field(default_factory=lambda: uuid.uuid4().hex)
     market_id: str
@@ -81,6 +85,15 @@ def already_scalped_market(market_id: str) -> bool:
     return any(t.market_id == market_id for t in load_scalps())
 
 
+def current_paper_equity(s: Settings = SETTINGS) -> float:
+    realized = sum(
+        trade.realized_pnl or 0.0
+        for trade in load_scalps()
+        if trade.status == "CLOSED" and trade.realized_pnl is not None
+    )
+    return max(s.starting_bankroll + realized, 0.0)
+
+
 def fetch_top_of_book(token_id: str) -> tuple[float, float]:
     """Return executable top-of-book (best bid, best ask) from the public CLOB."""
     response = requests.get(
@@ -93,10 +106,34 @@ def fetch_top_of_book(token_id: str) -> tuple[float, float]:
     bids = payload.get("bids") or []
     asks = payload.get("asks") or []
     if not bids or not asks:
-        raise RuntimeError("CLOB order book has no executable bid/ask.")
+        raise EmptyOrderBook("CLOB order book has no executable bid/ask yet.")
     best_bid = max(float(level["price"]) for level in bids)
     best_ask = min(float(level["price"]) for level in asks)
     return best_bid, best_ask
+
+
+def wait_for_top_of_book(
+    token_id: str,
+    *,
+    max_wait_seconds: float,
+    console: Console | None = None,
+) -> tuple[float, float]:
+    """Wait briefly for a two-sided executable book instead of treating emptiness as fatal."""
+    console = console or Console()
+    deadline = time.monotonic() + max(max_wait_seconds, 0.0)
+    announced = False
+    while True:
+        try:
+            return fetch_top_of_book(token_id)
+        except KeyboardInterrupt:
+            raise
+        except EmptyOrderBook:
+            if time.monotonic() >= deadline:
+                raise
+            if not announced:
+                console.print("[dim]No two-sided CLOB book yet; waiting for liquidity…[/dim]")
+                announced = True
+            time.sleep(1.0)
 
 
 def taker_fee(shares: float, price: float, s: Settings = SETTINGS) -> float:
@@ -134,22 +171,12 @@ def open_scalp(
     console: Console | None = None,
 ) -> ScalpTrade:
     console = console or Console()
-    decision = decide_baseline_trade(market, estimate, s.starting_bankroll, s)
+    equity = current_paper_equity(s)
+    decision = decide_baseline_trade(market, estimate, equity, s)
     if decision.side == "PASS":
         raise RuntimeError("Baseline side selection returned PASS.")
 
     token_id, side_label = _token_for_side(market, decision.side)
-    best_bid, best_ask = fetch_top_of_book(token_id)
-    if not 0 < best_ask < 1:
-        raise RuntimeError(f"Invalid executable ask {best_ask:.4f}.")
-
-    stake = round(
-        s.starting_bankroll * min(s.baseline_position_pct, s.max_position_pct), 2
-    )
-    shares = stake / best_ask
-    entry_fee = taker_fee(shares, best_ask, s)
-    initial_exit_fee = taker_fee(shares, best_bid, s)
-    initial_net = shares * (best_bid - best_ask) - entry_fee - initial_exit_fee
 
     now = datetime.now(timezone.utc)
     end = market.end_date
@@ -157,6 +184,26 @@ def open_scalp(
         raise RuntimeError("BTC market has no window end time.")
     if end.tzinfo is None:
         end = end.replace(tzinfo=timezone.utc)
+    seconds_available = max((end - now).total_seconds() - s.btc_scalp_force_exit_seconds, 0.0)
+    max_book_wait = min(float(s.btc_clob_wait_seconds), seconds_available)
+    if max_book_wait <= 0:
+        raise RuntimeError("Not enough time remains to wait for an executable order book.")
+
+    best_bid, best_ask = wait_for_top_of_book(
+        token_id,
+        max_wait_seconds=max_book_wait,
+        console=console,
+    )
+    if not 0 < best_ask < 1:
+        raise RuntimeError(f"Invalid executable ask {best_ask:.4f}.")
+
+    stake = round(equity * min(s.baseline_position_pct, s.max_position_pct), 2)
+    if stake <= 0:
+        raise RuntimeError("Paper equity is depleted; cannot open another simulated position.")
+    shares = stake / best_ask
+    entry_fee = taker_fee(shares, best_ask, s)
+    initial_exit_fee = taker_fee(shares, best_bid, s)
+    initial_net = shares * (best_bid - best_ask) - entry_fee - initial_exit_fee
 
     trade = ScalpTrade(
         market_id=market.id,
@@ -164,7 +211,7 @@ def open_scalp(
         side=decision.side,
         side_label=side_label,
         token_id=token_id,
-        entry_time=now,
+        entry_time=datetime.now(timezone.utc),
         window_end=end,
         entry_price=best_ask,
         stake=stake,
@@ -178,7 +225,8 @@ def open_scalp(
     _upsert_trade(trade)
     console.print(
         f"[green]PAPER SCALP OPENED:[/green] {side_label} ${trade.stake:.2f} | "
-        f"ask {best_ask:.3f} | bid {best_bid:.3f} | entry fee ${entry_fee:.2f}"
+        f"equity ${equity:,.2f} | ask {best_ask:.3f} | bid {best_bid:.3f} | "
+        f"entry fee ${entry_fee:.2f}"
     )
     return trade
 
@@ -261,8 +309,21 @@ def manage_scalp(
     while True:
         now = datetime.now(timezone.utc)
         seconds_left = (trade.window_end - now).total_seconds()
+        hold_seconds = max((now - trade.entry_time).total_seconds(), 0.0)
         try:
             bid, _ = fetch_top_of_book(trade.token_id)
+        except KeyboardInterrupt:
+            raise
+        except EmptyOrderBook as exc:
+            if seconds_left <= 0:
+                console.print(
+                    "[yellow]No executable bid through expiry; leaving this paper position OPEN "
+                    "for resolution recovery.[/yellow]"
+                )
+                return trade
+            console.print(f"[dim]Transient book gap: {exc}[/dim]")
+            time.sleep(min(max(s.btc_scalp_poll_seconds, 0.5), 5.0))
+            continue
         except Exception as exc:
             console.print(f"[dim]Transient book error: {exc}[/dim]")
             time.sleep(min(max(s.btc_scalp_poll_seconds, 0.5), 5.0))
@@ -279,9 +340,11 @@ def manage_scalp(
         _upsert_trade(trade)
 
         if last_bid != bid:
+            grace_left = max(s.btc_scalp_stop_grace_seconds - hold_seconds, 0.0)
+            grace_text = f" | stop grace {grace_left:.0f}s" if grace_left > 0 else ""
             console.print(
                 f"[dim]{trade.side_label} bid {bid:.3f} | net if sold now ${net:+.2f} | "
-                f"peak ${peak_net:+.2f} | {max(seconds_left, 0):.0f}s left[/dim]"
+                f"peak ${peak_net:+.2f} | {max(seconds_left, 0):.0f}s left{grace_text}[/dim]"
             )
             last_bid = bid
 
@@ -294,17 +357,21 @@ def manage_scalp(
             and net <= peak_net - s.btc_scalp_trail_giveback_usd
         ):
             reason = "TRAILING_PROFIT"
-        elif net <= -abs(s.btc_scalp_stop_loss_usd):
+        elif (
+            hold_seconds >= s.btc_scalp_stop_grace_seconds
+            and net <= -abs(s.btc_scalp_stop_loss_usd)
+        ):
             reason = "STOP_LOSS"
         elif seconds_left <= s.btc_scalp_force_exit_seconds:
             reason = "WINDOW_TIMEOUT"
 
         if reason:
             closed = close_scalp(trade, bid, reason, s=s)
+            equity = current_paper_equity(s)
             console.print(
                 f"[bold green]PAPER SCALP CLOSED:[/bold green] {closed.side_label} | "
                 f"{closed.entry_price:.3f} -> {closed.exit_price:.3f} | "
-                f"NET ${closed.realized_pnl:+.2f} | {reason}"
+                f"NET ${closed.realized_pnl:+.2f} | {reason} | equity ${equity:,.2f}"
             )
             return closed
 
@@ -333,9 +400,6 @@ def scalp_one_current_window(
             f"[yellow]Only {seconds_left:.0f}s remain in this window; skipping late entry.[/yellow]"
         )
         return None
-    if already_scalped_market(market.id):
-        console.print("[dim]This BTC 15m window is already in the scalp ledger.[/dim]")
-        return None
 
     selected_provider = resolve_provider(provider, s)
     console.print(
@@ -349,7 +413,10 @@ def scalp_one_current_window(
     return manage_scalp(trade, s=s, console=console)
 
 
-def scalp_metrics(trades: list[ScalpTrade]) -> dict[str, float | int]:
+def scalp_metrics(
+    trades: list[ScalpTrade],
+    s: Settings = SETTINGS,
+) -> dict[str, float | int]:
     closed = [t for t in trades if t.status == "CLOSED" and t.realized_pnl is not None]
     wins = [t for t in closed if (t.realized_pnl or 0) > 0]
     losses = [t for t in closed if (t.realized_pnl or 0) < 0]
@@ -373,7 +440,7 @@ def scalp_metrics(trades: list[ScalpTrade]) -> dict[str, float | int]:
         "total_fees": total_fees,
         "profit_factor": gross_wins / gross_losses if gross_losses else (float("inf") if gross_wins else 0.0),
         "avg_hold_seconds": sum(holds) / len(holds) if holds else 0.0,
-        "paper_equity": SETTINGS.starting_bankroll + net_pnl,
+        "paper_equity": s.starting_bankroll + net_pnl,
     }
 
 
@@ -463,6 +530,8 @@ def run_scalp_loop(
                     continue
 
                 scalp_one_current_window(provider, s=s, console=console)
+            except KeyboardInterrupt:
+                raise
             except ResearchProviderError as exc:
                 console.print(f"[red]Research failed:[/red] {exc}")
                 time.sleep(5)
