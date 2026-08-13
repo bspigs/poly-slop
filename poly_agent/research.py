@@ -34,11 +34,13 @@ SCHEMA = {
 }
 
 SYSTEM_COMMON = """You are a skeptical prediction-market research analyst.
-Estimate the probability that the specified market resolves YES.
+Estimate the probability of the market's designated positive outcome.
 Do not merely anchor on the market price. Focus on base rates, timing, the exact
 resolution wording, and strong arguments on both sides. Be conservative about
 confidence. If the resolution criteria are ambiguous or evidence quality is weak,
-reduce confidence. Return only the requested structured object."""
+reduce confidence. The JSON field fair_yes_probability always means the probability
+of the designated positive outcome, even when that outcome is labeled UP rather than YES.
+Return only the requested structured object."""
 
 SYSTEM_OPENAI = SYSTEM_COMMON + "\nUse live web research when useful and prefer primary-source facts."
 SYSTEM_OLLAMA = SYSTEM_COMMON + """
@@ -62,12 +64,14 @@ def resolve_provider(provider: str | None, s: Settings = SETTINGS) -> str:
 
 def _prompt(market: Market) -> str:
     return f"""Market question: {market.question}
-Current YES price: {market.yes_price:.4f}
-Current NO price: {market.no_price:.4f}
+Positive outcome: {market.positive_label}
+Negative outcome: {market.negative_label}
+Current {market.positive_label} price: {market.yes_price:.4f}
+Current {market.negative_label} price: {market.no_price:.4f}
 End date: {market.end_date}
 Description / resolution context: {market.description[:5000]}
 
-Independently estimate P(YES)."""
+Independently estimate P({market.positive_label}). Put that probability in fair_yes_probability."""
 
 
 def _estimate_openai(market: Market, s: Settings) -> ProbabilityEstimate:
