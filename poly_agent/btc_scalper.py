@@ -14,7 +14,7 @@ from rich.table import Table
 
 from .config import SETTINGS, Settings
 from .models import Market, ProbabilityEstimate
-from .polymarket import fetch_current_btc_15m_market
+from .polymarket import fetch_current_btc_15m_market, fetch_market_by_id
 from .research import ResearchProviderError, estimate_probability, resolve_provider
 from .risk import decide_baseline_trade
 
@@ -100,12 +100,16 @@ def fetch_top_of_book(token_id: str) -> tuple[float, float]:
 
 
 def taker_fee(shares: float, price: float, s: Settings = SETTINGS) -> float:
-    """Estimated current crypto taker fee in USDC for paper simulation."""
+    """Estimated crypto taker fee in USDC for the paper simulator."""
     fee = shares * s.btc_crypto_taker_fee_rate * price * (1 - price)
     return round(max(fee, 0.0), 5)
 
 
-def net_exit_pnl(trade: ScalpTrade, exit_bid: float, s: Settings = SETTINGS) -> tuple[float, float]:
+def net_exit_pnl(
+    trade: ScalpTrade,
+    exit_bid: float,
+    s: Settings = SETTINGS,
+) -> tuple[float, float]:
     exit_fee = taker_fee(trade.shares, exit_bid, s)
     gross = trade.shares * (exit_bid - trade.entry_price)
     net = gross - trade.entry_fee - exit_fee
@@ -114,11 +118,9 @@ def net_exit_pnl(trade: ScalpTrade, exit_bid: float, s: Settings = SETTINGS) -> 
 
 def _token_for_side(market: Market, side: str) -> tuple[str, str]:
     if side == "YES":
-        token_id = market.positive_token_id
-        label = market.positive_label
+        token_id, label = market.positive_token_id, market.positive_label
     else:
-        token_id = market.negative_token_id
-        label = market.negative_label
+        token_id, label = market.negative_token_id, market.negative_label
     if not token_id:
         raise RuntimeError(f"No CLOB token ID for {label}.")
     return token_id, label
@@ -141,9 +143,14 @@ def open_scalp(
     if not 0 < best_ask < 1:
         raise RuntimeError(f"Invalid executable ask {best_ask:.4f}.")
 
-    stake = s.starting_bankroll * min(s.baseline_position_pct, s.max_position_pct)
+    stake = round(
+        s.starting_bankroll * min(s.baseline_position_pct, s.max_position_pct), 2
+    )
     shares = stake / best_ask
     entry_fee = taker_fee(shares, best_ask, s)
+    initial_exit_fee = taker_fee(shares, best_bid, s)
+    initial_net = shares * (best_bid - best_ask) - entry_fee - initial_exit_fee
+
     now = datetime.now(timezone.utc)
     end = market.end_date
     if end is None:
@@ -160,33 +167,13 @@ def open_scalp(
         entry_time=now,
         window_end=end,
         entry_price=best_ask,
-        stake=round(stake, 2),
+        stake=stake,
         shares=shares,
         entry_fee=entry_fee,
         model_fair_probability=decision.fair_probability,
         model_confidence=estimate.confidence,
         peak_exit_bid=best_bid,
-        peak_net_pnl=net_exit_pnl(
-            ScalpTrade(
-                market_id=market.id,
-                question=market.question,
-                side=decision.side,
-                side_label=side_label,
-                token_id=token_id,
-                entry_time=now,
-                window_end=end,
-                entry_price=best_ask,
-                stake=round(stake, 2),
-                shares=shares,
-                entry_fee=entry_fee,
-                model_fair_probability=decision.fair_probability,
-                model_confidence=estimate.confidence,
-                peak_exit_bid=best_bid,
-                peak_net_pnl=0.0,
-            ),
-            best_bid,
-            s,
-        )[0],
+        peak_net_pnl=initial_net,
     )
     _upsert_trade(trade)
     console.print(
@@ -202,8 +189,14 @@ def close_scalp(
     reason: str,
     *,
     s: Settings = SETTINGS,
+    charge_exit_fee: bool = True,
 ) -> ScalpTrade:
-    pnl, exit_fee = net_exit_pnl(trade, exit_bid, s)
+    if charge_exit_fee:
+        pnl, exit_fee = net_exit_pnl(trade, exit_bid, s)
+    else:
+        exit_fee = 0.0
+        pnl = trade.shares * (exit_bid - trade.entry_price) - trade.entry_fee
+
     closed = trade.model_copy(
         update={
             "status": "CLOSED",
@@ -218,6 +211,41 @@ def close_scalp(
     )
     _upsert_trade(closed)
     return closed
+
+
+def recover_expired_open_scalps(console: Console | None = None) -> int:
+    """If PowerShell was closed mid-trade, settle expired positions from resolution."""
+    console = console or Console()
+    now = datetime.now(timezone.utc)
+    recovered = 0
+    for trade in load_scalps():
+        if trade.status != "OPEN" or trade.window_end > now:
+            continue
+        try:
+            market = fetch_market_by_id(trade.market_id)
+        except Exception:
+            continue
+        winner: str | None = None
+        if market.closed and market.yes_price >= 0.999 and market.no_price <= 0.001:
+            winner = "YES"
+        elif market.closed and market.no_price >= 0.999 and market.yes_price <= 0.001:
+            winner = "NO"
+        if winner is None:
+            continue
+
+        settlement_price = 1.0 if trade.side == winner else 0.0
+        close_scalp(
+            trade,
+            settlement_price,
+            "RECOVERED_AT_RESOLUTION",
+            charge_exit_fee=False,
+        )
+        recovered += 1
+        console.print(
+            f"[yellow]Recovered interrupted scalp:[/yellow] {trade.side_label} "
+            f"settled at {settlement_price:.0f}."
+        )
+    return recovered
 
 
 def manage_scalp(
@@ -236,12 +264,8 @@ def manage_scalp(
         try:
             bid, _ = fetch_top_of_book(trade.token_id)
         except Exception as exc:
-            if seconds_left <= s.btc_scalp_force_exit_seconds:
-                console.print(f"[yellow]Price fetch failed near expiry:[/yellow] {exc}")
-                time.sleep(1)
-                continue
             console.print(f"[dim]Transient book error: {exc}[/dim]")
-            time.sleep(s.btc_scalp_poll_seconds)
+            time.sleep(min(max(s.btc_scalp_poll_seconds, 0.5), 5.0))
             continue
 
         net, _ = net_exit_pnl(trade, bid, s)
@@ -284,7 +308,7 @@ def manage_scalp(
             )
             return closed
 
-        time.sleep(s.btc_scalp_poll_seconds)
+        time.sleep(max(s.btc_scalp_poll_seconds, 0.5))
 
 
 def scalp_one_current_window(
@@ -294,6 +318,7 @@ def scalp_one_current_window(
     console: Console | None = None,
 ) -> ScalpTrade | None:
     console = console or Console()
+    recover_expired_open_scalps(console)
     market = fetch_current_btc_15m_market()
     now = datetime.now(timezone.utc)
     end = market.end_date
@@ -318,10 +343,7 @@ def scalp_one_current_window(
         f"{market.positive_label} {market.yes_price:.1%} / {market.negative_label} {market.no_price:.1%}"
     )
     console.print(f"[bold]Research provider:[/bold] {selected_provider}")
-    try:
-        estimate = estimate_probability(market, provider=selected_provider, s=s)
-    except ResearchProviderError:
-        raise
+    estimate = estimate_probability(market, provider=selected_provider, s=s)
 
     trade = open_scalp(market, estimate, s=s, console=console)
     return manage_scalp(trade, s=s, console=console)
@@ -334,14 +356,12 @@ def scalp_metrics(trades: list[ScalpTrade]) -> dict[str, float | int]:
     gross_wins = sum(t.realized_pnl or 0 for t in wins)
     gross_losses = abs(sum(t.realized_pnl or 0 for t in losses))
     total_fees = sum(t.entry_fee + t.exit_fee for t in closed)
-    avg_hold = 0.0
-    if closed:
-        holds = [
-            (t.exit_time - t.entry_time).total_seconds()
-            for t in closed
-            if t.exit_time is not None
-        ]
-        avg_hold = sum(holds) / len(holds) if holds else 0.0
+    holds = [
+        (t.exit_time - t.entry_time).total_seconds()
+        for t in closed
+        if t.exit_time is not None
+    ]
+    net_pnl = sum(t.realized_pnl or 0 for t in closed)
     return {
         "trades": len(trades),
         "closed": len(closed),
@@ -349,16 +369,17 @@ def scalp_metrics(trades: list[ScalpTrade]) -> dict[str, float | int]:
         "wins": len(wins),
         "losses": len(losses),
         "hit_rate": len(wins) / len(closed) if closed else 0.0,
-        "net_pnl": sum(t.realized_pnl or 0 for t in closed),
+        "net_pnl": net_pnl,
         "total_fees": total_fees,
         "profit_factor": gross_wins / gross_losses if gross_losses else (float("inf") if gross_wins else 0.0),
-        "avg_hold_seconds": avg_hold,
-        "paper_equity": SETTINGS.starting_bankroll + sum(t.realized_pnl or 0 for t in closed),
+        "avg_hold_seconds": sum(holds) / len(holds) if holds else 0.0,
+        "paper_equity": SETTINGS.starting_bankroll + net_pnl,
     }
 
 
 def render_scalp_report(console: Console | None = None) -> dict[str, float | int]:
     console = console or Console()
+    recover_expired_open_scalps(console)
     trades = load_scalps()
     metrics = scalp_metrics(trades)
     console.print("\n[bold]POLY SLUDGE BTC 15M SCALP SCOREBOARD[/bold]")
@@ -409,7 +430,7 @@ def run_scalp_loop(
     console = console or Console()
     console.print(
         "[bold yellow]BTC 15M SCALPER - PAPER MONEY ONLY[/bold yellow] | "
-        "takes one trade per window, monitors executable bids, and exits early when rules fire. "
+        "one trade per window, executable ask entry / bid exit, fee-aware early exits. "
         "Press Ctrl+C to stop."
     )
     try:
