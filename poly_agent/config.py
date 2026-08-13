@@ -45,7 +45,7 @@ class Settings:
     btc_scalp_trail_giveback_usd: float = _f("BTC_SCALP_TRAIL_GIVEBACK_USD", 0.20)
     btc_scalp_stop_loss_usd: float = _f("BTC_SCALP_STOP_LOSS_USD", 3.00)
     btc_scalp_force_exit_seconds: int = _i("BTC_SCALP_FORCE_EXIT_SECONDS", 20)
-    btc_scalp_min_entry_seconds: int = _i("BTC_SCALP_MIN_ENTRY_SECONDS", 120)
+    btc_scalp_min_entry_seconds: int = _i("BTC_SCALP_MIN_ENTRY_SECONDS", 30)
     btc_crypto_taker_fee_rate: float = _f("BTC_CRYPTO_TAKER_FEE_RATE", 0.07)
 
 
