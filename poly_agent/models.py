@@ -13,6 +13,8 @@ class Market(BaseModel):
     end_date: datetime | None = None
     yes_price: float = Field(ge=0, le=1)
     no_price: float = Field(ge=0, le=1)
+    positive_label: str = "YES"
+    negative_label: str = "NO"
     liquidity: float = 0
     volume: float = 0
     active: bool = True
@@ -40,6 +42,8 @@ class TradeDecision(BaseModel):
     confidence: float
     stake: float
     rationale: str
+    positive_label: str = "YES"
+    negative_label: str = "NO"
 
 
 class PaperPosition(BaseModel):
@@ -53,3 +57,5 @@ class PaperPosition(BaseModel):
     stake: float
     shares: float
     estimated_edge: float
+    positive_label: str = "YES"
+    negative_label: str = "NO"
