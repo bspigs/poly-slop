@@ -121,13 +121,14 @@ def run_multi_scalp_loop(
 
                 result = scalp_next_in_current_window(provider, s=s, console=console)
                 if result is not None and result.status == "CLOSED":
-                    metrics = scalp_metrics(load_scalps())
+                    metrics = scalp_metrics(load_scalps(), s)
                     console.print(
                         f"[bold]RUNNING SCALP STATS:[/bold] "
                         f"{metrics['wins']}W/{metrics['losses']}L | "
                         f"hit {float(metrics['hit_rate']):.1%} | "
                         f"net ${float(metrics['net_pnl']):+,.2f} | "
-                        f"fees ${float(metrics['total_fees']):,.2f}"
+                        f"fees ${float(metrics['total_fees']):,.2f} | "
+                        f"equity ${float(metrics['paper_equity']):,.2f}"
                     )
 
                     now_after = datetime.now(timezone.utc)
@@ -141,6 +142,8 @@ def run_multi_scalp_loop(
 
                 time.sleep(0.5)
 
+            except KeyboardInterrupt:
+                raise
             except ResearchProviderError as exc:
                 console.print(f"[red]Research failed:[/red] {exc}")
                 time.sleep(3)
@@ -150,10 +153,11 @@ def run_multi_scalp_loop(
 
     except KeyboardInterrupt:
         console.print("\n[bold]BTC multi-scalp loop stopped.[/bold]")
-        metrics = scalp_metrics(load_scalps())
+        metrics = scalp_metrics(load_scalps(), s)
         console.print(
             f"Final: {metrics['wins']}W/{metrics['losses']}L | "
             f"hit {float(metrics['hit_rate']):.1%} | "
             f"net ${float(metrics['net_pnl']):+,.2f} | "
-            f"fees ${float(metrics['total_fees']):,.2f}"
+            f"fees ${float(metrics['total_fees']):,.2f} | "
+            f"equity ${float(metrics['paper_equity']):,.2f}"
         )
