@@ -74,13 +74,7 @@ def build_report() -> tuple[list[PaperResult], dict[str, float | int]]:
                 market_cache[position.market_id] = market
             results.append(settle_position(position, market))
         except Exception as exc:
-            results.append(
-                PaperResult(
-                    position=position,
-                    status="ERROR",
-                    error=str(exc),
-                )
-            )
+            results.append(PaperResult(position=position, status="ERROR", error=str(exc)))
 
     resolved = [r for r in results if r.status in {"WIN", "LOSS"}]
     wins = sum(r.status == "WIN" for r in resolved)
@@ -105,6 +99,10 @@ def build_report() -> tuple[list[PaperResult], dict[str, float | int]]:
         "paper_equity": SETTINGS.starting_bankroll + realized_pnl,
     }
     return results, metrics
+
+
+def _side_label(position: PaperPosition) -> str:
+    return position.positive_label if position.side == "YES" else position.negative_label
 
 
 def render_report(console: Console | None = None) -> dict[str, float | int]:
@@ -145,7 +143,7 @@ def render_report(console: Console | None = None) -> dict[str, float | int]:
         pnl = "-" if result.status not in {"WIN", "LOSS"} else f"${result.pnl:+,.2f}"
         table.add_row(
             result.status,
-            result.position.side,
+            _side_label(result.position),
             f"{result.position.entry_price:.1%}",
             f"${result.position.stake:,.2f}",
             pnl,
