@@ -61,8 +61,18 @@ def settle_position(position: PaperPosition, market: Market) -> PaperResult:
     )
 
 
-def build_report() -> tuple[list[PaperResult], dict[str, float | int]]:
+def _is_btc_15m(position: PaperPosition) -> bool:
+    question = position.question.lower()
+    return question.startswith("bitcoin up or down") or question.startswith("btc up or down")
+
+
+def build_report(
+    *, btc_15m_only: bool = False
+) -> tuple[list[PaperResult], dict[str, float | int]]:
     positions = load_positions()
+    if btc_15m_only:
+        positions = [p for p in positions if _is_btc_15m(p)]
+
     results: list[PaperResult] = []
     market_cache: dict[str, Market] = {}
 
@@ -105,13 +115,18 @@ def _side_label(position: PaperPosition) -> str:
     return position.positive_label if position.side == "YES" else position.negative_label
 
 
-def render_report(console: Console | None = None) -> dict[str, float | int]:
+def render_report(
+    console: Console | None = None,
+    *,
+    btc_15m_only: bool = False,
+) -> dict[str, float | int]:
     console = console or Console()
-    results, metrics = build_report()
+    results, metrics = build_report(btc_15m_only=btc_15m_only)
 
-    console.print("\n[bold]POLY SLUDGE PAPER SCOREBOARD[/bold]")
+    title = "POLY SLUDGE BTC 15M SCOREBOARD" if btc_15m_only else "POLY SLUDGE PAPER SCOREBOARD"
+    console.print(f"\n[bold]{title}[/bold]")
     if not results:
-        console.print("[yellow]No paper trades yet. Run baseline paper mode first.[/yellow]")
+        console.print("[yellow]No matching paper trades yet.[/yellow]")
         return metrics
 
     console.print(
@@ -131,7 +146,7 @@ def render_report(console: Console | None = None) -> dict[str, float | int]:
     else:
         console.print("[dim]No positions have resolved yet, so success rate is not available yet.[/dim]")
 
-    table = Table(title="Paper Trades")
+    table = Table(title="BTC 15m Paper Trades" if btc_15m_only else "Paper Trades")
     table.add_column("Status")
     table.add_column("Side")
     table.add_column("Entry")
