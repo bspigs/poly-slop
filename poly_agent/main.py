@@ -6,8 +6,9 @@ from rich.console import Console
 from rich.table import Table
 
 from .config import SETTINGS
-from .paper import record
+from .paper import already_traded_market, record
 from .polymarket import fetch_markets, load_markets_from_file
+from .report import render_report
 from .research import ResearchProviderError, estimate_probability, resolve_provider
 from .risk import decide_baseline_trade, decide_trade
 from .scanner import days_to_resolution, rank_markets
@@ -86,7 +87,7 @@ def run(
         )
         console.print(
             f"[bold yellow]BASELINE PAPER MODE[/bold yellow] - simulation only; "
-            f"records one ${fake_stake:,.2f} paper position per researched market."
+            f"records one ${fake_stake:,.2f} paper position per new market."
         )
     elif execute_paper:
         console.print(
@@ -94,9 +95,19 @@ def run(
             "records only trades that pass confidence/edge gates."
         )
 
+    research_queue = ranked
+    if baseline_paper:
+        research_queue = [m for m in ranked if not already_traded_market(m.id)]
+        skipped = len(ranked) - len(research_queue)
+        if skipped:
+            console.print(f"[dim]Skipped {skipped} market(s) already in the paper ledger.[/dim]")
+        if not research_queue:
+            console.print("[yellow]All current candidate markets are already in the paper ledger.[/yellow]")
+            return
+
     bankroll = SETTINGS.starting_bankroll
 
-    for market in ranked[:max_research]:
+    for market in research_queue[:max_research]:
         console.print(f"\n[bold cyan]Researching:[/bold cyan] {market.question}")
         try:
             estimate = estimate_probability(market, provider=selected_provider)
@@ -135,10 +146,20 @@ def cli() -> None:
     parser.add_argument(
         "--paper-baseline",
         action="store_true",
-        help="Record a small fixed simulated trade for every researched market, bypassing normal confidence/edge gates",
+        help="Record a small fixed simulated trade for every new researched market, bypassing normal confidence/edge gates",
+    )
+    parser.add_argument(
+        "--report",
+        action="store_true",
+        help="Check paper markets for resolution and show hit rate, P&L, ROI, and Brier score",
     )
     parser.add_argument("--demo", action="store_true", help="Use bundled synthetic markets instead of the live API")
     args = parser.parse_args()
+
+    if args.report:
+        render_report(console)
+        return
+
     run(
         max_research=args.research,
         execute_paper=args.paper,
