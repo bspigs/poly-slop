@@ -63,10 +63,10 @@ class Settings:
     )
     btc_signal_max_adverse_accel_bps: float = _f("BTC_SIGNAL_MAX_ADVERSE_ACCEL_BPS", 999.0)
     btc_signal_min_fair_probability: float = _f("BTC_SIGNAL_MIN_FAIR_PROBABILITY", 0.50)
-    btc_signal_min_fee_adjusted_edge: float = _f("BTC_SIGNAL_MIN_FEE_ADJUSTED_EDGE", -0.015)
-    btc_signal_max_spread: float = _f("BTC_SIGNAL_MAX_SPREAD", 0.10)
-    btc_signal_min_contract_price: float = _f("BTC_SIGNAL_MIN_CONTRACT_PRICE", 0.05)
-    btc_signal_max_contract_price: float = _f("BTC_SIGNAL_MAX_CONTRACT_PRICE", 0.95)
+    btc_signal_min_fee_adjusted_edge: float = _f("BTC_SIGNAL_MIN_FEE_ADJUSTED_EDGE", -1.0)
+    btc_signal_max_spread: float = _f("BTC_SIGNAL_MAX_SPREAD", 0.20)
+    btc_signal_min_contract_price: float = _f("BTC_SIGNAL_MIN_CONTRACT_PRICE", 0.02)
+    btc_signal_max_contract_price: float = _f("BTC_SIGNAL_MAX_CONTRACT_PRICE", 0.98)
     btc_signal_min_depth_multiple: float = _f("BTC_SIGNAL_MIN_DEPTH_MULTIPLE", 1.0)
     btc_signal_reversal_check_after_seconds: float = _f(
         "BTC_SIGNAL_REVERSAL_CHECK_AFTER_SECONDS", 3.0
@@ -75,14 +75,14 @@ class Settings:
         "BTC_SIGNAL_REVERSAL_MIN_CONFIDENCE", 0.51
     )
 
-    # 1 Hz slip-scanner gates. It compares both executable outcome books every
-    # second. A small negative threshold is intentional for PAPER exploration:
-    # it allows near-breakeven quotes through so we can observe whether fleeting
-    # BTC/Polymarket dislocations subsequently move in our favor.
-    btc_tick_min_fee_adjusted_edge: float = _f("BTC_TICK_MIN_FEE_ADJUSTED_EDGE", -0.015)
-    btc_tick_max_spread: float = _f("BTC_TICK_MAX_SPREAD", 0.10)
-    btc_tick_min_contract_price: float = _f("BTC_TICK_MIN_CONTRACT_PRICE", 0.05)
-    btc_tick_max_contract_price: float = _f("BTC_TICK_MAX_CONTRACT_PRICE", 0.95)
+    # 1 Hz slip-scanner gates. The -1.0 edge floor effectively disables the
+    # model-quality gate in PAPER mode: whenever at least one outcome has a
+    # realistically executable two-sided book, the scanner ranks the outcomes
+    # and is allowed to trade the better one.
+    btc_tick_min_fee_adjusted_edge: float = _f("BTC_TICK_MIN_FEE_ADJUSTED_EDGE", -1.0)
+    btc_tick_max_spread: float = _f("BTC_TICK_MAX_SPREAD", 0.20)
+    btc_tick_min_contract_price: float = _f("BTC_TICK_MIN_CONTRACT_PRICE", 0.02)
+    btc_tick_max_contract_price: float = _f("BTC_TICK_MAX_CONTRACT_PRICE", 0.98)
     btc_tick_min_depth_multiple: float = _f("BTC_TICK_MIN_DEPTH_MULTIPLE", 1.0)
 
 
