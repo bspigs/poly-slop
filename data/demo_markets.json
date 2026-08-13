@@ -1,0 +1,35 @@
+[
+  {
+    "id": "demo-1",
+    "question": "Will Example Event A happen by December 31?",
+    "outcomes": ["Yes", "No"],
+    "outcomePrices": ["0.41", "0.59"],
+    "liquidityNum": 85000,
+    "volumeNum": 240000,
+    "active": true,
+    "closed": false,
+    "description": "Synthetic demo market used only to verify scanner behavior."
+  },
+  {
+    "id": "demo-2",
+    "question": "Will Example Event B happen this year?",
+    "outcomes": "[\"Yes\", \"No\"]",
+    "outcomePrices": "[\"0.62\", \"0.38\"]",
+    "liquidityNum": 190000,
+    "volumeNum": 1300000,
+    "active": true,
+    "closed": false,
+    "description": "Synthetic demo market used only to verify scanner behavior."
+  },
+  {
+    "id": "demo-3",
+    "question": "Will Example Event C resolve YES?",
+    "outcomes": ["Yes", "No"],
+    "outcomePrices": ["0.51", "0.49"],
+    "liquidityNum": 310000,
+    "volumeNum": 2100000,
+    "active": true,
+    "closed": false,
+    "description": "Synthetic demo market used only to verify scanner behavior."
+  }
+]
