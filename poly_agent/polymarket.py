@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import requests
 
+from .config import SETTINGS, Settings
 from .models import Market
 
 GAMMA = "https://gamma-api.polymarket.com"
@@ -69,11 +70,30 @@ def normalize_market(raw: dict[str, Any]) -> Market | None:
     )
 
 
-def fetch_markets(limit: int = 100) -> list[Market]:
-    """Fetch currently active markets from Polymarket's public Gamma API."""
+def fetch_markets(
+    limit: int = 100,
+    s: Settings = SETTINGS,
+    now: datetime | None = None,
+) -> list[Market]:
+    """Fetch active Polymarket markets inside the configured resolution window."""
+    current = now or datetime.now(timezone.utc)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=timezone.utc)
+
+    start = current + timedelta(days=s.min_days_to_resolution)
+    end = current + timedelta(days=s.max_days_to_resolution)
+
     response = requests.get(
         f"{GAMMA}/markets",
-        params={"active": "true", "closed": "false", "limit": limit},
+        params={
+            "active": "true",
+            "closed": "false",
+            "limit": limit,
+            "end_date_min": start.isoformat(),
+            "end_date_max": end.isoformat(),
+            "liquidity_num_min": s.min_liquidity,
+            "volume_num_min": s.min_volume,
+        },
         timeout=20,
     )
     response.raise_for_status()
