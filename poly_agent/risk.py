@@ -14,6 +14,13 @@ def _best_side(market: Market, estimate: ProbabilityEstimate) -> tuple[str, floa
     return "NO", no_edge, market.no_price, fair_no
 
 
+def _labels(market: Market) -> dict[str, str]:
+    return {
+        "positive_label": market.positive_label,
+        "negative_label": market.negative_label,
+    }
+
+
 def decide_trade(
     market: Market,
     estimate: ProbabilityEstimate,
@@ -35,6 +42,7 @@ def decide_trade(
             confidence=estimate.confidence,
             stake=0,
             rationale="Confidence below minimum threshold.",
+            **_labels(market),
         )
 
     side, edge, price, fair = _best_side(market, estimate)
@@ -42,7 +50,6 @@ def decide_trade(
     if edge < s.min_edge:
         side = "PASS"
 
-    # Fractional Kelly, then capped hard by portfolio policy.
     if side == "PASS" or price <= 0 or price >= 1:
         stake = 0.0
     else:
@@ -66,6 +73,7 @@ def decide_trade(
             if side != "PASS"
             else f"Best estimated edge {edge:.1%} is below the required threshold or confidence gate."
         ),
+        **_labels(market),
     )
 
 
@@ -75,11 +83,7 @@ def decide_baseline_trade(
     bankroll: float,
     s: Settings = SETTINGS,
 ) -> TradeDecision:
-    """Always take the model's relatively better side with a small fixed paper stake.
-
-    This deliberately bypasses the normal minimum-confidence and minimum-edge gates
-    so we can collect a baseline sample. It is for simulation only.
-    """
+    """Always take the model's relatively better side with a small fixed paper stake."""
     side, edge, price, fair = _best_side(market, estimate)
     if price <= 0 or price >= 1:
         return TradeDecision(
@@ -92,6 +96,7 @@ def decide_baseline_trade(
             confidence=estimate.confidence,
             stake=0,
             rationale="Invalid market price for baseline paper trade.",
+            **_labels(market),
         )
 
     baseline_pct = max(0.0, min(s.baseline_position_pct, s.max_position_pct))
@@ -109,4 +114,5 @@ def decide_baseline_trade(
             "Baseline paper sample: fixed simulated stake; normal confidence and edge "
             "gates intentionally bypassed."
         ),
+        **_labels(market),
     )
