@@ -2,7 +2,7 @@
 
 A live-data Polymarket research + paper-trading agent.
 
-It pulls active markets, ranks liquid candidates, estimates fair `P(YES)`, applies deterministic risk gates, and can record simulated positions. It intentionally contains no wallet integration or live order-placement code.
+It pulls active markets, ranks liquid near-term candidates, estimates fair `P(YES)`, records simulated positions, and can automatically check resolved markets to score the paper strategy. It intentionally contains no wallet integration or live order-placement code.
 
 ## Research providers
 
@@ -33,19 +33,49 @@ ollama pull qwen3:8b
 
 Ollama serves its local API at `http://localhost:11434` and local access does not require authentication.
 
-Test the AI path against bundled synthetic markets:
+## Short-term baseline paper experiment
+
+The scanner defaults to markets resolving within the next 7 days.
+
+To create a baseline sample that actually places simulated trades instead of passing on conservative confidence/edge gates:
 
 ```powershell
-python -m poly_agent.main --demo --provider ollama --research 1
+python -m poly_agent.main --provider ollama --research 5 --paper-baseline
 ```
 
-Run against live Polymarket market data:
+Baseline mode uses a fixed small paper stake (default 0.25% of the fake bankroll, or $25 on a $10,000 paper bankroll) and records at most one baseline position per market.
+
+Run it again later to add new short-term markets. Markets already present in the paper ledger are skipped.
+
+## Paper scoreboard
+
+Check every paper position against Polymarket and print resolved wins/losses and performance:
 
 ```powershell
-python -m poly_agent.main --provider ollama --research 5
+python -m poly_agent.main --report
 ```
 
-Record qualifying simulated trades:
+The report shows:
+
+- total, resolved, pending, and failed lookups
+- wins and losses
+- hit rate
+- realized paper P&L
+- ROI on resolved stakes
+- Brier score for probability calibration
+- current paper equity
+
+A position is treated as resolved only when Polymarket reports the market closed and the binary outcome prices have finalized to 1/0. Winning paper shares pay $1 each; losing paper shares pay $0.
+
+Paper trades live in:
+
+```text
+data/paper_trades.jsonl
+```
+
+## Conservative paper mode
+
+To record only trades that pass the normal risk gates:
 
 ```powershell
 python -m poly_agent.main --provider ollama --research 5 --paper
@@ -64,19 +94,21 @@ python -m poly_agent.main --research 0
 Put `OPENAI_API_KEY` in `.env`, then:
 
 ```powershell
-python -m poly_agent.main --provider openai --research 5
+python -m poly_agent.main --provider openai --research 5 --paper-baseline
 ```
 
-## Current risk gates
+## Current settings
 
 Defaults in `.env.example`:
 
-- Minimum estimated edge: 8 percentage points
-- Minimum confidence: 60%
+- Resolution window: 0 to 7 days
+- Minimum estimated edge in conservative mode: 8 percentage points
+- Minimum confidence in conservative mode: 60%
 - Maximum position: 1% of bankroll
-- Position sizing: 1/4 Kelly, hard-capped by max position
+- Conservative sizing: 1/4 Kelly, hard-capped by max position
+- Baseline paper position: 0.25% of bankroll
 
-These are starter safety values, not claims of optimal sizing.
+These are starter experiment settings, not claims of optimal sizing.
 
 ## GitHub Actions
 
@@ -87,18 +119,17 @@ These are starter safety values, not claims of optimal sizing.
 `AGENTS.md` contains repo-level rules for Codex. Good next tasks include:
 
 - Add SQLite storage for market snapshots and forecasts.
-- Add resolved-market settlement and Brier-score calibration.
 - Add a keyless public-source retrieval layer for Ollama with source timestamps and URLs.
+- Add calibration buckets/reliability curves after enough markets resolve.
 - Add a dashboard for modeled edge, calibration, and paper P&L.
 
 ## Next milestones
 
-1. Persistent market-snapshot database
-2. Resolution ingestion and P&L settlement
-3. Brier score + calibration curves
-4. Source capture/audit trail
-5. Duplicate/correlated-market exposure controls
-6. Historical backtesting
-7. Keyless web evidence for local Ollama
+1. Persistent SQLite market-snapshot database
+2. Calibration buckets/reliability curves
+3. Source capture/audit trail
+4. Duplicate/correlated-market exposure controls
+5. Historical backtesting
+6. Keyless web evidence for local Ollama
 
-Only after those work should live execution even be evaluated.
+Only after the paper system has a meaningful resolved sample should live execution even be evaluated.
