@@ -37,5 +37,16 @@ class Settings:
     baseline_position_pct: float = _f("BASELINE_POSITION_PCT", 0.0025)
     starting_bankroll: float = _f("STARTING_BANKROLL", 10_000)
 
+    # BTC 15-minute scalp paper simulator. These are intentionally explicit so
+    # we can tune the experiment without changing code.
+    btc_scalp_poll_seconds: float = _f("BTC_SCALP_POLL_SECONDS", 2.0)
+    btc_scalp_take_profit_usd: float = _f("BTC_SCALP_TAKE_PROFIT_USD", 0.25)
+    btc_scalp_trail_arm_usd: float = _f("BTC_SCALP_TRAIL_ARM_USD", 0.15)
+    btc_scalp_trail_giveback_usd: float = _f("BTC_SCALP_TRAIL_GIVEBACK_USD", 0.20)
+    btc_scalp_stop_loss_usd: float = _f("BTC_SCALP_STOP_LOSS_USD", 3.00)
+    btc_scalp_force_exit_seconds: int = _i("BTC_SCALP_FORCE_EXIT_SECONDS", 20)
+    btc_scalp_min_entry_seconds: int = _i("BTC_SCALP_MIN_ENTRY_SECONDS", 120)
+    btc_crypto_taker_fee_rate: float = _f("BTC_CRYPTO_TAKER_FEE_RATE", 0.07)
+
 
 SETTINGS = Settings()
